@@ -9,7 +9,8 @@ import {
   Search,
   Settings,
   Zap,
-  CheckCircle2
+  CheckCircle2,
+  Trophy
 } from 'lucide-react';
 import styles from './PredictionForm.module.css';
 import { api, type PredictionResult } from '../services/api';
@@ -297,10 +298,11 @@ export const PredictionForm: React.FC = () => {
               {MODELS.map(m => (
                 <div
                   key={m.id}
-                  className={`${styles.modelTag} ${selectedModels.includes(m.id) ? styles.modelTagActive : ''}`}
+                  className={`${styles.modelTag} ${selectedModels.includes(m.id) ? styles.modelTagActive : ''} ${m.id === 'rf' ? styles.bestModelTag : ''}`}
                   onClick={() => toggleModel(m.id)}
                 >
                   {selectedModels.includes(m.id) && <CheckCircle2 size={10} style={{ display: 'inline', marginRight: 4 }} />}
+                  {m.id === 'rf' && <Trophy size={10} style={{ display: 'inline', marginRight: 4, color: '#facc15' }} />}
                   {m.short}
                 </div>
               ))}
@@ -337,11 +339,18 @@ export const PredictionForm: React.FC = () => {
                       key={id}
                       initial={{ opacity: 0, x: 20 }}
                       animate={{ opacity: 1, x: 0 }}
-                      className={styles.resultRow}
+                      className={`${styles.resultRow} ${id === 'rf' ? styles.bestResultRow : ''}`}
                     >
-                      <span className={styles.modelName}>
-                        {MODELS.find(m => m.id === id)?.name || id}
-                      </span>
+                      <div className={styles.modelNameWrapper}>
+                        <span className={styles.modelName}>
+                          {MODELS.find(m => m.id === id)?.name || id}
+                        </span>
+                        {id === 'rf' && (
+                          <span className={styles.bestBadge}>
+                            <Trophy size={10} /> BEST MODEL
+                          </span>
+                        )}
+                      </div>
                       <div>
                         <span className={styles.modelValue}>{result.value}</span>
                         <span className={styles.modelUnit}>{result.unit}</span>

@@ -363,6 +363,49 @@
   margin-left: 0.2rem;
 }
 
+.modelNameWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.bestBadge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #facc15; /* Yellow/Gold */
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  letter-spacing: 0.05em;
+  background: rgba(250, 204, 21, 0.1);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.bestModelTag {
+  border-color: rgba(250, 204, 21, 0.4) !important;
+  color: #facc15 !important;
+}
+
+.bestModelTag:hover {
+  background: rgba(250, 204, 21, 0.05) !important;
+}
+
+.bestResultRow {
+  background: rgba(250, 204, 21, 0.04);
+  border-color: rgba(250, 204, 21, 0.2);
+  box-shadow: 0 0 15px rgba(250, 204, 21, 0.05);
+}
+
+.bestResultRow:hover {
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.bestResultRow .modelValue {
+  color: #facc15;
+}
+
 .errorRow {
   background: rgba(244, 63, 94, 0.05);
   border-color: rgba(244, 63, 94, 0.2);
