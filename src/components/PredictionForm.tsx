@@ -1,23 +1,34 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CloudSun, Thermometer, ArrowRight, Loader2, RefreshCw, Trash2, Search, MapPin } from 'lucide-react';
+import {
+  CloudSun,
+  ArrowRight,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  Search,
+  MapPin,
+  Settings,
+  Zap,
+  CheckCircle2
+} from 'lucide-react';
 import styles from './PredictionForm.module.css';
 import { api, type PredictionResult } from '../services/api';
 
 const MODELS = [
-  { id: 'lr', name: 'Linear Regression' },
-  { id: 'rf', name: 'Random Forest' },
-  { id: 'ann', name: 'ANN' },
-  { id: 'ann_tuned', name: 'ANN Tuned' },
-  { id: 'svr', name: 'SVR' },
-  { id: 'svr_tuned', name: 'SVR Tuned' },
-  { id: 'gbr', name: 'Gradient Boosting' },
-  { id: 'gbr_tuned', name: 'GBR Tuned' },
-  { id: 'lstm', name: 'LSTM' },
+  { id: 'lr', name: 'Linear Reg', short: 'LR' },
+  { id: 'rf', name: 'Random Forest', short: 'RF' },
+  { id: 'svr', name: 'SVR', short: 'SVR' },
+  { id: 'svr_tuned', name: 'SVR Tuned', short: 'SVR-T' },
+  { id: 'gbr', name: 'Gradient Boost', short: 'GBR' },
+  { id: 'gbr_tuned', name: 'GBR Tuned', short: 'GBR-T' },
+  { id: 'ann', name: 'ANN', short: 'ANN' },
+  { id: 'ann_tuned', name: 'ANN Tuned', short: 'ANN-T' },
+  { id: 'lstm', name: 'LSTM', short: 'LSTM' },
 ];
 
-const RECOMMENDED_MODELS = ['rf', 'gbr_tuned', 'ann_tuned'];
+const RECOMMENDED_MODELS = ['rf', 'gbr_tuned', 'ann_tuned', 'lstm'];
 
 type WeatherRow = {
   max: string;
@@ -31,7 +42,6 @@ export const PredictionForm: React.FC = () => {
   const [inputMode, setInputMode] = useState<'manual' | 'city'>('manual');
   const [cityQuery, setCityQuery] = useState('');
 
-  // 14 rows, 5 columns
   const [weatherData, setWeatherData] = useState<WeatherRow[]>(
     Array(14).fill(null).map(() => ({ max: '', min: '', precip: '', snow: '', depth: '' }))
   );
@@ -58,34 +68,23 @@ export const PredictionForm: React.FC = () => {
   };
 
   const fillDemoData = () => {
-    // Generate realistic weather pattern
     const newData = weatherData.map((_, i) => {
       const baseTemp = 70 + Math.sin(i / 2) * 10;
       const max = (baseTemp + 5 + Math.random() * 5).toFixed(1);
       const min = (baseTemp - 5 - Math.random() * 5).toFixed(1);
-      const precip = Math.random() > 0.7 ? (Math.random() * 0.5).toFixed(2) : '0';
+      const precip = Math.random() > 0.8 ? (Math.random() * 0.2).toFixed(2) : '0';
       return {
-        max,
-        min,
-        precip,
-        snow: '0',
-        depth: '0'
+        max, min, precip, snow: '0', depth: '0'
       };
     });
     setWeatherData(newData);
   };
-
-  // --- Model Selection ---
 
   const toggleModel = (id: string) => {
     setSelectedModels(prev =>
       prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]
     );
   };
-
-  const selectAllModels = () => setSelectedModels(MODELS.map(m => m.id));
-  const selectRecommended = () => setSelectedModels(RECOMMENDED_MODELS);
-  const deselectAll = () => setSelectedModels([]);
 
   // --- API Calls ---
 
@@ -101,12 +100,10 @@ export const PredictionForm: React.FC = () => {
       const data = await api.getHistoricalWeather(location.latitude, location.longitude);
 
       if (!data.daily || !data.daily.temperature_2m_min || data.daily.temperature_2m_min.length < 14) {
-        throw new Error("Insufficient historical data.");
+        throw new Error("Insufficient data.");
       }
 
-      // Map API response to our grid (Last 14 days)
       const daily = data.daily;
-      // Indexing: Open-Meteo returns array. We take last 14.
       const startIndex = daily.time.length - 14;
 
       const newRows = Array(14).fill(null).map((_, i) => {
@@ -116,11 +113,12 @@ export const PredictionForm: React.FC = () => {
           min: daily.temperature_2m_min[idx]?.toString() || '',
           precip: daily.precipitation_sum[idx]?.toString() || '0',
           snow: daily.snowfall_sum[idx]?.toString() || '0',
-          depth: '0' // Default
+          depth: '0'
         };
       });
-
       setWeatherData(newRows);
+      // Auto-switch to results view or focus
+      setPredictions(null);
     } catch (err: any) {
       setGlobalError(err.message || "Failed to fetch city data.");
     } finally {
@@ -134,36 +132,26 @@ export const PredictionForm: React.FC = () => {
     setPredictions(null);
     setModelErrors({});
 
-    // Validation
     if (selectedModels.length === 0) {
-      setGlobalError("Please select at least one model.");
+      setGlobalError("Select at least one model.");
       setLoading(false);
       return;
     }
 
-    // specific validation: check if max/min are filled
-    const missingData = weatherData.some((row) => {
-      return row.max === '' || row.min === '';
-    });
-
+    const missingData = weatherData.some((row) => row.max === '' || row.min === '');
     if (missingData) {
-      setGlobalError("Max and Min temperatures are required for all 14 days.");
+      setGlobalError("Max & Min temps needed.");
       setLoading(false);
       return;
     }
 
-    // Construct Payload
     const window = weatherData.map(row => [
-      parseFloat(row.max),
-      parseFloat(row.min),
-      parseFloat(row.precip || '0'),
-      parseFloat(row.snow || '0'),
-      parseFloat(row.depth || '0')
+      parseFloat(row.max), parseFloat(row.min), parseFloat(row.precip || '0'),
+      parseFloat(row.snow || '0'), parseFloat(row.depth || '0')
     ]);
 
-    // Check for NaNs
     if (window.some(row => row.some(val => isNaN(val)))) {
-      setGlobalError("All inputs must be valid numbers.");
+      setGlobalError("Invalid numbers detected.");
       setLoading(false);
       return;
     }
@@ -171,9 +159,7 @@ export const PredictionForm: React.FC = () => {
     try {
       const response = await api.getPrediction(selectedModels, window);
       setPredictions(response.predictions);
-      if (response.errors) {
-        setModelErrors(response.errors);
-      }
+      if (response.errors) setModelErrors(response.errors);
     } catch (err: any) {
       setGlobalError(err.message || "Prediction failed.");
     } finally {
@@ -183,176 +169,211 @@ export const PredictionForm: React.FC = () => {
 
   return (
     <div className={styles.container}>
+      {/* Header */}
       <header className={styles.header}>
-        <motion.h1
-          className={styles.title}
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-        >
-          <CloudSun size={48} className="text-sky-400" color="#38bdf8" />
-          Weather Predict AI
-        </motion.h1>
-        <p className={styles.subtitle}>Multivariate 14-Day Forecast System</p>
+        <div>
+          <h1 className={styles.title}>
+            <CloudSun size={24} className="text-sky-400" color="#38bdf8" />
+            WeatherAI
+          </h1>
+          <p className={styles.subtitle}>Forecast System v2.0</p>
+        </div>
+
+        {/* Top Controls */}
+        <div className={styles.topControls}>
+          <div className={styles.modeToggle}>
+            <button
+              className={`${styles.modeButton} ${inputMode === 'manual' ? styles.modeButtonActive : ''}`}
+              onClick={() => setInputMode('manual')}
+            >
+              Manual
+            </button>
+            <button
+              className={`${styles.modeButton} ${inputMode === 'city' ? styles.modeButtonActive : ''}`}
+              onClick={() => setInputMode('city')}
+            >
+              City Search
+            </button>
+          </div>
+
+          <AnimatePresence mode="wait">
+            {inputMode === 'city' && (
+              <motion.div
+                className={styles.searchWrapper}
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: 'auto' }}
+                exit={{ opacity: 0, width: 0 }}
+              >
+                <Search className={styles.searchIcon} />
+                <input
+                  className={styles.navInput}
+                  placeholder="San Francisco..."
+                  value={cityQuery}
+                  onChange={e => setCityQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleCitySearch()}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </header>
 
-      {/* Mode Switch */}
-      <div className={styles.modeSwitch}>
-        <button
-          className={`${styles.modeButton} ${inputMode === 'manual' ? styles.modeButtonActive : ''}`}
-          onClick={() => setInputMode('manual')}
-        >
-          Manual Entry
-        </button>
-        <button
-          className={`${styles.modeButton} ${inputMode === 'city' ? styles.modeButtonActive : ''}`}
-          onClick={() => setInputMode('city')}
-        >
-          Find City
-        </button>
-      </div>
+      {/* Main Content Split */}
+      <div className={styles.contentArea}>
 
-      {/* City Search */}
-      <AnimatePresence>
-        {inputMode === 'city' && (
-          <motion.div
-            className={styles.searchContainer}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-          >
-            <div style={{ position: 'relative', flex: 1 }}>
-              <input
-                className={styles.input}
-                style={{ textAlign: 'left', paddingLeft: '2.5rem' }}
-                placeholder="Enter city name..."
-                value={cityQuery}
-                onChange={e => setCityQuery(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleCitySearch()}
-              />
-              <MapPin size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+        {/* Left: Input Grid */}
+        <div className={styles.leftPanel}>
+          <div className={styles.panelHeader}>
+            <span className={styles.panelTitle}>
+              <Settings size={14} /> 14-Day History
+            </span>
+            <div className={styles.quickActions}>
+              <button className={styles.iconBtn} onClick={fillDemoData} title="Demo Data">
+                <RefreshCw size={14} />
+              </button>
+              <button className={styles.iconBtn} onClick={clearData} title="Clear">
+                <Trash2 size={14} />
+              </button>
             </div>
-            <button className={styles.searchButton} onClick={handleCitySearch} disabled={loading}>
-              <Search size={20} />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
 
-      {/* Data Grid */}
-      <div className={styles.tableWrapper}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th style={{ width: '80px' }}>Day</th>
-              <th>Max Temp (°F)</th>
-              <th>Min Temp (°F)</th>
-              <th>Precip (in)</th>
-              <th>Snow (in)</th>
-              <th>Depth (in)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {weatherData.map((row, i) => (
-              <tr key={i}>
-                <td className={styles.dayLabel}>Day {i + 1}</td>
-                {Object.keys(row).map((key) => (
-                  <td key={key}>
-                    <input
-                      type="number"
-                      className={styles.input}
-                      value={row[key as keyof WeatherRow]}
-                      onChange={(e) => handleCellChange(i, key as keyof WeatherRow, e.target.value)}
-                      placeholder={['precip', 'snow', 'depth'].includes(key) ? '0' : '--'}
-                    />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          <div className={styles.gridContainer}>
+            <div className={styles.dataGrid} style={{ gridTemplateColumns: '40px repeat(5, 1fr)' }}>
+              {/* Header Row */}
+              <div className={styles.gridHeaderCell}>#</div>
+              <div className={styles.gridHeaderCell}>Max</div>
+              <div className={styles.gridHeaderCell}>Min</div>
+              <div className={styles.gridHeaderCell}>Rain</div>
+              <div className={styles.gridHeaderCell}>Snow</div>
+              <div className={styles.gridHeaderCell}>Depth</div>
 
-      <div className={styles.tableActions}>
-        <button className={styles.clearButton} onClick={clearData}>
-          <Trash2 size={16} /> Clear Data
-        </button>
-        {inputMode === 'manual' && (
-          <button className={styles.clearButton} onClick={fillDemoData} style={{ color: '#38bdf8', borderColor: 'rgba(56,189,248,0.3)' }}>
-            <RefreshCw size={16} /> Load Demo
-          </button>
-        )}
-      </div>
-
-      {/* Model Selection */}
-      <div className={styles.modelSection}>
-        <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Select Models</span>
-          <div className={styles.modelActions}>
-            <button className={styles.textButton} onClick={selectAllModels}>Select All</button>
-            <button className={styles.textButton} onClick={selectRecommended}>Recommended</button>
-            <button className={styles.textButton} onClick={deselectAll}>None</button>
+              {/* Data Rows */}
+              {weatherData.map((row, i) => (
+                <React.Fragment key={i}>
+                  <div className={styles.gridRowLabel}>{i + 1}</div>
+                  <input
+                    className={styles.gridInput}
+                    value={row.max}
+                    onChange={e => handleCellChange(i, 'max', e.target.value)}
+                    placeholder="--"
+                  />
+                  <input
+                    className={styles.gridInput}
+                    value={row.min}
+                    onChange={e => handleCellChange(i, 'min', e.target.value)}
+                    placeholder="--"
+                  />
+                  <input
+                    className={styles.gridInput}
+                    value={row.precip}
+                    onChange={e => handleCellChange(i, 'precip', e.target.value)}
+                    placeholder="0"
+                  />
+                  <input
+                    className={styles.gridInput}
+                    value={row.snow}
+                    onChange={e => handleCellChange(i, 'snow', e.target.value)}
+                    placeholder="0"
+                  />
+                  <input
+                    className={styles.gridInput}
+                    value={row.depth}
+                    onChange={e => handleCellChange(i, 'depth', e.target.value)}
+                    placeholder="0"
+                  />
+                </React.Fragment>
+              ))}
+            </div>
           </div>
         </div>
-        <div className={styles.modelsGrid}>
-          {MODELS.map(model => (
-            <label key={model.id} className={styles.checkboxLabel} style={selectedModels.includes(model.id) ? { borderColor: '#38bdf8', background: 'rgba(56,189,248,0.1)' } : {}}>
-              <input
-                type="checkbox"
-                checked={selectedModels.includes(model.id)}
-                onChange={() => toggleModel(model.id)}
-              />
-              <span>{model.name}</span>
-            </label>
-          ))}
+
+        {/* Right: Models & Output */}
+        <div className={styles.rightPanel}>
+
+          {/* Models */}
+          <div className={styles.modelsCard}>
+            <span className={styles.panelTitle} style={{ marginBottom: '0.8rem' }}>
+              <Zap size={14} /> Active Models
+            </span>
+            <div className={styles.modelTags}>
+              {MODELS.map(m => (
+                <div
+                  key={m.id}
+                  className={`${styles.modelTag} ${selectedModels.includes(m.id) ? styles.modelTagActive : ''}`}
+                  onClick={() => toggleModel(m.id)}
+                >
+                  {selectedModels.includes(m.id) && <CheckCircle2 size={10} style={{ display: 'inline', marginRight: 4 }} />}
+                  {m.short}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button
+            className={styles.predictBtn}
+            onClick={handlePredict}
+            disabled={loading}
+          >
+            {loading ? <Loader2 className="animate-spin" size={18} /> : null}
+            {loading ? 'Processing...' : 'Run Forecast'}
+          </button>
+
+          {/* Results List */}
+          <div className={styles.resultsArea}>
+            <AnimatePresence>
+              {globalError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={styles.resultRow}
+                  style={{ borderColor: '#f43f5e', color: '#f43f5e', justifyContent: 'center' }}
+                >
+                  {globalError}
+                </motion.div>
+              )}
+
+              {predictions && (
+                <div className={styles.resultsList}>
+                  {Object.entries(predictions).map(([id, result]) => (
+                    <motion.div
+                      key={id}
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className={styles.resultRow}
+                    >
+                      <span className={styles.modelName}>
+                        {MODELS.find(m => m.id === id)?.name || id}
+                      </span>
+                      <div>
+                        <span className={styles.modelValue}>{result.value}</span>
+                        <span className={styles.modelUnit}>{result.unit}</span>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+
+              {/* Only show errors if no predictions or mixed */}
+              {Object.entries(modelErrors).map(([id, err]) => (
+                <motion.div
+                  key={`err-${id}`}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className={`${styles.resultRow} ${styles.errorRow}`}
+                >
+                  <span className={styles.modelName} style={{ color: '#f43f5e' }}>
+                    {MODELS.find(m => m.id === id)?.short || id}
+                  </span>
+                  <span className={styles.errorText} title={err}>
+                    {err.includes('unexpected keyword') ? 'Config Error' : 'Failed'}
+                  </span>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+
         </div>
       </div>
-
-      <div className={styles.actions}>
-        <button className={styles.button} onClick={handlePredict} disabled={loading}>
-          {loading ? <Loader2 className="animate-spin" /> : <Thermometer />}
-          {loading ? 'Processing...' : 'Predict Weather'}
-          {!loading && <ArrowRight size={18} />}
-        </button>
-      </div>
-
-      {/* Errors & Results */}
-      <AnimatePresence>
-        {globalError && (
-          <motion.div
-            className={styles.error}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-          >
-            {globalError}
-          </motion.div>
-        )}
-
-        {predictions && (
-          <motion.div
-            className={styles.resultsGrid}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-          >
-            {Object.entries(predictions).map(([id, result]) => (
-              <div key={id} className={styles.resultCard}>
-                <h3>{MODELS.find(m => m.id === id)?.name || id}</h3>
-                <div className={styles.value}>
-                  {result.value}
-                  <span className={styles.unit}>{result.unit}</span>
-                </div>
-              </div>
-            ))}
-
-            {/* Display Model Specific Errors */}
-            {Object.entries(modelErrors).map(([id, err]) => (
-              <div key={id} className={styles.resultCard} style={{ borderColor: '#f43f5e' }}>
-                <h3>{MODELS.find(m => m.id === id)?.name || id}</h3>
-                <div className={styles.errorText}>{err}</div>
-              </div>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };
