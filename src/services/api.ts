@@ -1,15 +1,25 @@
+
 import axios from 'axios';
 
 const API_BASE_URL = 'http://localhost:5000';
 
 export interface PredictionRequest {
   models: string[];
-  data: number[];
+  window: number[][]; // 14x5 matrix
+}
+
+export interface PredictionResult {
+  value: number;
+  unit: string;
 }
 
 export interface PredictionResponse {
-  input_data: number[];
-  predictions: Record<string, number>;
+  predictions: Record<string, PredictionResult>;
+  errors?: Record<string, string>;
+  meta: {
+    input_shape: { rows: number; cols: number };
+    timestamp: string;
+  };
 }
 
 export const api = {
@@ -20,12 +30,20 @@ export const api = {
   },
 
   // Get predictions from Flask API
-  getPrediction: async (models: string[], data: number[]) => {
-    const response = await axios.post<PredictionResponse>(`${API_BASE_URL}/predict`, {
-      models,
-      data
-    });
-    return response.data;
+  getPrediction: async (models: string[], windowData: number[][]) => {
+    try {
+      const response = await axios.post<PredictionResponse>(`${API_BASE_URL}/predict`, {
+        models,
+        window: windowData
+      });
+      return response.data;
+    } catch (error: any) {
+      // Enhance error object
+      if (error.response && error.response.data) {
+        throw new Error(error.response.data.error || "Server error");
+      }
+      throw error;
+    }
   },
 
   // Open-Meteo Geocoding API
@@ -43,11 +61,12 @@ export const api = {
 
   // Open-Meteo Historical Weather API
   getHistoricalWeather: async (lat: number, lon: number) => {
-    // Get past 15 days to ensure we have 14 full days of previous data
+    // Get past 14 days (excluding today usually, or including? Prompt says "last 14 days")
+    // Let's take yesterday as the last day to ensure data availability
     const endDate = new Date();
     endDate.setDate(endDate.getDate() - 1); // Yesterday
     const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 14); // 14 days ago
+    startDate.setDate(startDate.getDate() - 14); // 14 days before yesterday
 
     const formatDate = (date: Date) => date.toISOString().split('T')[0];
 
@@ -57,7 +76,12 @@ export const api = {
         longitude: lon,
         start_date: formatDate(startDate),
         end_date: formatDate(endDate),
-        daily: 'temperature_2m_min',
+        daily: [
+          'temperature_2m_max',
+          'temperature_2m_min',
+          'precipitation_sum',
+          'snowfall_sum'
+        ].join(','),
         timezone: 'auto'
       }
     });

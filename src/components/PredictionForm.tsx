@@ -1,60 +1,128 @@
+
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CloudSun, Thermometer, ArrowRight, Loader2, RefreshCw, MapPin, Search } from 'lucide-react';
+import { CloudSun, Thermometer, ArrowRight, Loader2, RefreshCw, Trash2, Search, MapPin } from 'lucide-react';
 import styles from './PredictionForm.module.css';
-import { api } from '../services/api';
+import { api, type PredictionResult } from '../services/api';
 
 const MODELS = [
-  { id: 'linear_regression', name: 'Linear Regression' },
-  { id: 'random_forest', name: 'Random Forest' },
-  { id: 'ann', name: 'ANN (Neural Network)' },
+  { id: 'lr', name: 'Linear Regression' },
+  { id: 'rf', name: 'Random Forest' },
+  { id: 'ann', name: 'ANN' },
+  { id: 'ann_tuned', name: 'ANN Tuned' },
+  { id: 'svr', name: 'SVR' },
+  { id: 'svr_tuned', name: 'SVR Tuned' },
+  { id: 'gbr', name: 'Gradient Boosting' },
+  { id: 'gbr_tuned', name: 'GBR Tuned' },
+  { id: 'lstm', name: 'LSTM' },
 ];
+
+const RECOMMENDED_MODELS = ['rf', 'gbr_tuned', 'ann_tuned'];
+
+type WeatherRow = {
+  max: string;
+  min: string;
+  precip: string;
+  snow: string;
+  depth: string;
+};
 
 export const PredictionForm: React.FC = () => {
   const [inputMode, setInputMode] = useState<'manual' | 'city'>('manual');
   const [cityQuery, setCityQuery] = useState('');
-  const [selectedModels, setSelectedModels] = useState<string[]>(['linear_regression', 'random_forest', 'ann']);
 
-  const [temps, setTemps] = useState<string[]>(Array(14).fill(''));
+  // 14 rows, 5 columns
+  const [weatherData, setWeatherData] = useState<WeatherRow[]>(
+    Array(14).fill(null).map(() => ({ max: '', min: '', precip: '', snow: '', depth: '' }))
+  );
+
+  const [selectedModels, setSelectedModels] = useState<string[]>(RECOMMENDED_MODELS);
   const [loading, setLoading] = useState(false);
-  const [predictions, setPredictions] = useState<Record<string, number> | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [predictions, setPredictions] = useState<Record<string, PredictionResult> | null>(null);
+  const [modelErrors, setModelErrors] = useState<Record<string, string>>({});
+  const [globalError, setGlobalError] = useState<string | null>(null);
 
-  const handleInputChange = (index: number, value: string) => {
-    const newTemps = [...temps];
-    newTemps[index] = value;
-    setTemps(newTemps);
+  // --- Handlers ---
+
+  const handleCellChange = (rowIndex: number, field: keyof WeatherRow, value: string) => {
+    const newData = [...weatherData];
+    newData[rowIndex] = { ...newData[rowIndex], [field]: value };
+    setWeatherData(newData);
   };
 
-  const toggleModel = (modelId: string) => {
+  const clearData = () => {
+    setWeatherData(Array(14).fill(null).map(() => ({ max: '', min: '', precip: '', snow: '', depth: '' })));
+    setPredictions(null);
+    setGlobalError(null);
+    setModelErrors({});
+  };
+
+  const fillDemoData = () => {
+    // Generate realistic weather pattern
+    const newData = weatherData.map((_, i) => {
+      const baseTemp = 70 + Math.sin(i / 2) * 10;
+      const max = (baseTemp + 5 + Math.random() * 5).toFixed(1);
+      const min = (baseTemp - 5 - Math.random() * 5).toFixed(1);
+      const precip = Math.random() > 0.7 ? (Math.random() * 0.5).toFixed(2) : '0';
+      return {
+        max,
+        min,
+        precip,
+        snow: '0',
+        depth: '0'
+      };
+    });
+    setWeatherData(newData);
+  };
+
+  // --- Model Selection ---
+
+  const toggleModel = (id: string) => {
     setSelectedModels(prev =>
-      prev.includes(modelId)
-        ? prev.filter(id => id !== modelId)
-        : [...prev, modelId]
+      prev.includes(id) ? prev.filter(m => m !== id) : [...prev, id]
     );
   };
+
+  const selectAllModels = () => setSelectedModels(MODELS.map(m => m.id));
+  const selectRecommended = () => setSelectedModels(RECOMMENDED_MODELS);
+  const deselectAll = () => setSelectedModels([]);
+
+  // --- API Calls ---
 
   const handleCitySearch = async () => {
     if (!cityQuery.trim()) return;
     setLoading(true);
-    setError(null);
+    setGlobalError(null);
+
     try {
       const location = await api.searchCity(cityQuery);
-      if (!location) {
-        throw new Error(`City "${cityQuery}" not found.`);
+      if (!location) throw new Error(`City "${cityQuery}" not found.`);
+
+      const data = await api.getHistoricalWeather(location.latitude, location.longitude);
+
+      if (!data.daily || !data.daily.temperature_2m_min || data.daily.temperature_2m_min.length < 14) {
+        throw new Error("Insufficient historical data.");
       }
 
-      const weatherData = await api.getHistoricalWeather(location.latitude, location.longitude);
-      // Ensure we have enough data
-      if (!weatherData.daily || !weatherData.daily.temperature_2m_min || weatherData.daily.temperature_2m_min.length < 14) {
-        throw new Error("Insufficient historical data for this location.");
-      }
+      // Map API response to our grid (Last 14 days)
+      const daily = data.daily;
+      // Indexing: Open-Meteo returns array. We take last 14.
+      const startIndex = daily.time.length - 14;
 
-      // Take the last 14 days
-      const last14Days = weatherData.daily.temperature_2m_min.slice(-14).map((t: number) => t.toString());
-      setTemps(last14Days);
+      const newRows = Array(14).fill(null).map((_, i) => {
+        const idx = startIndex + i;
+        return {
+          max: daily.temperature_2m_max[idx]?.toString() || '',
+          min: daily.temperature_2m_min[idx]?.toString() || '',
+          precip: daily.precipitation_sum[idx]?.toString() || '0',
+          snow: daily.snowfall_sum[idx]?.toString() || '0',
+          depth: '0' // Default
+        };
+      });
+
+      setWeatherData(newRows);
     } catch (err: any) {
-      setError(err.message || "Failed to fetch city data.");
+      setGlobalError(err.message || "Failed to fetch city data.");
     } finally {
       setLoading(false);
     }
@@ -62,45 +130,55 @@ export const PredictionForm: React.FC = () => {
 
   const handlePredict = async () => {
     setLoading(true);
-    setError(null);
+    setGlobalError(null);
     setPredictions(null);
+    setModelErrors({});
 
-    // Validate inputs
-    const numericTemps = temps.map(t => parseFloat(t));
-    if (numericTemps.some(isNaN)) {
-      setError("Please ensure 14 days of valid temperature data is available.");
+    // Validation
+    if (selectedModels.length === 0) {
+      setGlobalError("Please select at least one model.");
       setLoading(false);
       return;
     }
 
-    if (selectedModels.length === 0) {
-      setError("Please select at least one model.");
+    // specific validation: check if max/min are filled
+    const missingData = weatherData.some((row) => {
+      return row.max === '' || row.min === '';
+    });
+
+    if (missingData) {
+      setGlobalError("Max and Min temperatures are required for all 14 days.");
+      setLoading(false);
+      return;
+    }
+
+    // Construct Payload
+    const window = weatherData.map(row => [
+      parseFloat(row.max),
+      parseFloat(row.min),
+      parseFloat(row.precip || '0'),
+      parseFloat(row.snow || '0'),
+      parseFloat(row.depth || '0')
+    ]);
+
+    // Check for NaNs
+    if (window.some(row => row.some(val => isNaN(val)))) {
+      setGlobalError("All inputs must be valid numbers.");
       setLoading(false);
       return;
     }
 
     try {
-      // Simulate a small delay for better UX
-      await new Promise(resolve => setTimeout(resolve, 600));
-
-      const response = await api.getPrediction(selectedModels, numericTemps);
+      const response = await api.getPrediction(selectedModels, window);
       setPredictions(response.predictions);
+      if (response.errors) {
+        setModelErrors(response.errors);
+      }
     } catch (err: any) {
-      console.error("Prediction Error", err);
-      setError(err.message || "An error occurred during prediction.");
+      setGlobalError(err.message || "Prediction failed.");
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemoData = () => {
-    const baseTemp = 20;
-    const demo = Array(14).fill(0).map((_, i) => {
-      const trend = Math.sin(i / 2) * 5;
-      const noise = (Math.random() - 0.5) * 2;
-      return (baseTemp + trend + noise).toFixed(1);
-    });
-    setTemps(demo);
   };
 
   return (
@@ -108,21 +186,13 @@ export const PredictionForm: React.FC = () => {
       <header className={styles.header}>
         <motion.h1
           className={styles.title}
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
         >
           <CloudSun size={48} className="text-sky-400" color="#38bdf8" />
-          MinTemp AI
+          Weather Predict AI
         </motion.h1>
-        <motion.p
-          className={styles.subtitle}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2, duration: 0.5 }}
-        >
-          Predict tomorrow's minimum temperature
-        </motion.p>
+        <p className={styles.subtitle}>Multivariate 14-Day Forecast System</p>
       </header>
 
       {/* Mode Switch */}
@@ -131,139 +201,155 @@ export const PredictionForm: React.FC = () => {
           className={`${styles.modeButton} ${inputMode === 'manual' ? styles.modeButtonActive : ''}`}
           onClick={() => setInputMode('manual')}
         >
-          Manual Input
+          Manual Entry
         </button>
         <button
           className={`${styles.modeButton} ${inputMode === 'city' ? styles.modeButtonActive : ''}`}
           onClick={() => setInputMode('city')}
         >
-          Select City
+          Find City
         </button>
       </div>
 
-      <AnimatePresence mode="wait">
-        {inputMode === 'city' ? (
+      {/* City Search */}
+      <AnimatePresence>
+        {inputMode === 'city' && (
           <motion.div
-            key="city"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
             className={styles.searchContainer}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
           >
             <div style={{ position: 'relative', flex: 1 }}>
               <input
-                type="text"
                 className={styles.input}
-                style={{ paddingLeft: '2.5rem', textAlign: 'left' }}
+                style={{ textAlign: 'left', paddingLeft: '2.5rem' }}
                 placeholder="Enter city name..."
                 value={cityQuery}
-                onChange={(e) => setCityQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleCitySearch()}
+                onChange={e => setCityQuery(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleCitySearch()}
               />
-              <MapPin size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,255,255,0.5)' }} />
+              <MapPin size={18} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
             </div>
             <button className={styles.searchButton} onClick={handleCitySearch} disabled={loading}>
               <Search size={20} />
             </button>
           </motion.div>
-        ) : (
-          <motion.div key="manual" />
         )}
       </AnimatePresence>
 
-      <span className={styles.sectionLabel}>14 Days Previous Min Temp (°C)</span>
-
-      <div className={styles.grid}>
-        {temps.map((temp, index) => (
-          <motion.div
-            key={index}
-            className={styles.inputGroup}
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: index * 0.03 }}
-          >
-            <label className={styles.label}>Day {index + 1}</label>
-            <input
-              type="number"
-              className={styles.input}
-              value={temp}
-              onChange={(e) => handleInputChange(index, e.target.value)}
-              placeholder="--"
-              readOnly={inputMode === 'city'} // Read-only if fetched from city
-              style={inputMode === 'city' ? { opacity: 0.7, cursor: 'default' } : {}}
-            />
-          </motion.div>
-        ))}
+      {/* Data Grid */}
+      <div className={styles.tableWrapper}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th style={{ width: '80px' }}>Day</th>
+              <th>Max Temp (°F)</th>
+              <th>Min Temp (°F)</th>
+              <th>Precip (in)</th>
+              <th>Snow (in)</th>
+              <th>Depth (in)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {weatherData.map((row, i) => (
+              <tr key={i}>
+                <td className={styles.dayLabel}>Day {i + 1}</td>
+                {Object.keys(row).map((key) => (
+                  <td key={key}>
+                    <input
+                      type="number"
+                      className={styles.input}
+                      value={row[key as keyof WeatherRow]}
+                      onChange={(e) => handleCellChange(i, key as keyof WeatherRow, e.target.value)}
+                      placeholder={['precip', 'snow', 'depth'].includes(key) ? '0' : '--'}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      {inputMode === 'manual' && (
-        <div style={{ textAlign: 'center' }}>
-          <button onClick={fillDemoData} className={styles.demoButton}>
-            <RefreshCw size={14} style={{ marginRight: '8px', display: 'inline-block', verticalAlign: 'middle' }} />
-            Auto-fill with Demo Data
+      <div className={styles.tableActions}>
+        <button className={styles.clearButton} onClick={clearData}>
+          <Trash2 size={16} /> Clear Data
+        </button>
+        {inputMode === 'manual' && (
+          <button className={styles.clearButton} onClick={fillDemoData} style={{ color: '#38bdf8', borderColor: 'rgba(56,189,248,0.3)' }}>
+            <RefreshCw size={16} /> Load Demo
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
-      <span className={styles.sectionLabel}>Select AI Models</span>
-      <div className={styles.modelsGrid}>
-        {MODELS.map(model => (
-          <label key={model.id} className={styles.checkboxLabel}>
-            <input
-              type="checkbox"
-              checked={selectedModels.includes(model.id)}
-              onChange={() => toggleModel(model.id)}
-            />
-            <span>{model.name}</span>
-          </label>
-        ))}
+      {/* Model Selection */}
+      <div className={styles.modelSection}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>Select Models</span>
+          <div className={styles.modelActions}>
+            <button className={styles.textButton} onClick={selectAllModels}>Select All</button>
+            <button className={styles.textButton} onClick={selectRecommended}>Recommended</button>
+            <button className={styles.textButton} onClick={deselectAll}>None</button>
+          </div>
+        </div>
+        <div className={styles.modelsGrid}>
+          {MODELS.map(model => (
+            <label key={model.id} className={styles.checkboxLabel} style={selectedModels.includes(model.id) ? { borderColor: '#38bdf8', background: 'rgba(56,189,248,0.1)' } : {}}>
+              <input
+                type="checkbox"
+                checked={selectedModels.includes(model.id)}
+                onChange={() => toggleModel(model.id)}
+              />
+              <span>{model.name}</span>
+            </label>
+          ))}
+        </div>
       </div>
 
       <div className={styles.actions}>
-        <button
-          className={styles.button}
-          onClick={handlePredict}
-          disabled={loading}
-        >
+        <button className={styles.button} onClick={handlePredict} disabled={loading}>
           {loading ? <Loader2 className="animate-spin" /> : <Thermometer />}
-          {loading ? 'Analyzing...' : 'Predict Result'}
+          {loading ? 'Processing...' : 'Predict Weather'}
           {!loading && <ArrowRight size={18} />}
         </button>
       </div>
 
+      {/* Errors & Results */}
       <AnimatePresence>
-        {error && (
+        {globalError && (
           <motion.div
             className={styles.error}
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
           >
-            {error}
+            {globalError}
           </motion.div>
         )}
 
         {predictions && (
           <motion.div
-            className={styles.resultWrapper}
+            className={styles.resultsGrid}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
           >
-            <div className={styles.resultsGrid}>
-              {Object.entries(predictions).map(([modelId, value]) => {
-                const modelName = MODELS.find(m => m.id === modelId)?.name || modelId;
-                return (
-                  <div key={modelId} className={styles.resultCard}>
-                    <h3>{modelName}</h3>
-                    <div className="value">
-                      {typeof value === 'number' ? value.toFixed(2) : value}
-                      <span style={{ fontSize: '1rem', marginLeft: '4px', opacity: 0.7 }}>°C</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            {Object.entries(predictions).map(([id, result]) => (
+              <div key={id} className={styles.resultCard}>
+                <h3>{MODELS.find(m => m.id === id)?.name || id}</h3>
+                <div className={styles.value}>
+                  {result.value}
+                  <span className={styles.unit}>{result.unit}</span>
+                </div>
+              </div>
+            ))}
+
+            {/* Display Model Specific Errors */}
+            {Object.entries(modelErrors).map(([id, err]) => (
+              <div key={id} className={styles.resultCard} style={{ borderColor: '#f43f5e' }}>
+                <h3>{MODELS.find(m => m.id === id)?.name || id}</h3>
+                <div className={styles.errorText}>{err}</div>
+              </div>
+            ))}
           </motion.div>
         )}
       </AnimatePresence>
