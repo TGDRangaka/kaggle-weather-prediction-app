@@ -3,12 +3,10 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CloudSun,
-  ArrowRight,
   Loader2,
   RefreshCw,
   Trash2,
   Search,
-  MapPin,
   Settings,
   Zap,
   CheckCircle2

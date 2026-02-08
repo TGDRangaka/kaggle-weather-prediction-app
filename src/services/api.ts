@@ -82,7 +82,9 @@ export const api = {
           'precipitation_sum',
           'snowfall_sum'
         ].join(','),
-        timezone: 'auto'
+        timezone: 'auto',
+        temperature_unit: 'fahrenheit',
+        precipitation_unit: 'inch'
       }
     });
 
